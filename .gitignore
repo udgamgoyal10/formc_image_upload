@@ -1,0 +1,23 @@
+# Credentials and secrets
+credentials.json
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Temporary files
+temp.jpg
+*.tmp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
