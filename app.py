@@ -36,12 +36,35 @@ def compress_image(file) -> str:
     """Compress image under 50 KB and return temp path."""
     image = Image.open(file).convert("RGB")
     temp_path = "temp.jpg"
+    
+    # Get original dimensions
+    width, height = image.size
+    
+    # Start with original size and quality
+    new_width, new_height = width, height
     quality = 85
-    while True:
-        image.save(temp_path, "JPEG", optimize=True, quality=quality)
-        if os.path.getsize(temp_path) < 50_000 or quality < 10:
-            break
+    scale_factor = 1.0
+    
+    # First try just compressing without resizing
+    image.save(temp_path, "JPEG", optimize=True, quality=quality)
+    
+    # If still too large, start resizing and compressing
+    while os.path.getsize(temp_path) >= 50_000 and quality >= 10:
+        # Reduce quality first
         quality -= 5
+        image.save(temp_path, "JPEG", optimize=True, quality=quality)
+        
+        # If still too large after minimum quality, start reducing size
+        if os.path.getsize(temp_path) >= 50_000 and quality <= 10:
+            scale_factor *= 0.8  # Reduce to 80% each time
+            new_width = int(width * scale_factor)
+            new_height = int(height * scale_factor)
+            resized_image = image.resize((new_width, new_height), Image.LANCZOS)
+            resized_image.save(temp_path, "JPEG", optimize=True, quality=quality)
+            
+            # Reset quality to try again with smaller image
+            quality = 30
+    
     return temp_path
 
 def upload_to_drive(local_path, filename):
@@ -90,7 +113,7 @@ def download_file(file_id):
     return fh
 
 # --- Streamlit UI ---
-st.title("📸 Form C Photo Uploader")
+st.title("📸 Nepali Form C Photo Uploader")
 
 st.subheader("Upload Photo")
 name = st.text_input("Person's Name")
@@ -98,7 +121,7 @@ photo = st.file_uploader("Choose a photo", type=["jpg", "jpeg", "png"])
 
 # Show image preview if photo is uploaded
 if photo:
-    st.image(photo, caption="Preview", use_container_width=True)
+    st.image(photo, caption="Preview", width="stretch")
 
 # Add upload button
 if st.button("Upload Photo") and photo and name:
@@ -142,7 +165,7 @@ if search_term:
         
         # Show preview of selected image
         fh = download_file(selected_file_id)
-        st.image(fh, caption=f"Preview: {selected_file}", use_container_width=True)
+        st.image(fh, caption=f"Preview: {selected_file}", width="stretch")
         
         # Download button
         fh.seek(0)  # Reset file pointer for download
