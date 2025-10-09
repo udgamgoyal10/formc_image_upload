@@ -8,6 +8,7 @@ A Streamlit application for uploading and downloading photos to/from Google Driv
 - 🔍 Search and download photos from Google Drive
 - 👁️ Preview images before downloading
 - 🔒 Secure authentication via Google Service Account
+- 🗄️ Database search for devotee by name or PP number
 
 ## Local Development
 
@@ -58,5 +59,5 @@ Your app will automatically restart and use the secrets for authentication!
 ## Environment Variables
 
 The app automatically detects whether it's running locally or on Streamlit Cloud:
-- **Local**: Uses `credentials.json` file
+- **Local**: Uses `credentials.json` file and hardcoded database credentials
 - **Streamlit Cloud**: Uses secrets from `.streamlit/secrets.toml`
