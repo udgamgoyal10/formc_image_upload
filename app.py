@@ -193,8 +193,8 @@ def get_db_connection():
         debug_config["password"] = "*****"
         print(f"Attempting to connect to database with: {debug_config}")
         
-        # Set a shorter timeout for connection attempts
-        conn = pymysql.connect(**DB_CONFIG, connect_timeout=10)
+        # Set a shorter timeout for connection attempts (5 seconds for cloud)
+        conn = pymysql.connect(**DB_CONFIG, connect_timeout=5)
         
         # Test the connection with a simple query
         with conn.cursor() as cursor:
@@ -203,6 +203,12 @@ def get_db_connection():
             print(f"Database connection test result: {result}")
         
         return conn
+    except pymysql.err.OperationalError as e:
+        error_code = e.args[0] if e.args else 0
+        if error_code == 2003:
+            print(f"Database server unreachable: {str(e)}")
+            print("This is expected on Streamlit Cloud if using a private IP address.")
+        raise
     except Exception as e:
         print(f"Database connection error: {type(e).__name__}: {str(e)}")
         raise
@@ -290,8 +296,17 @@ def search_devotees(search_term):
         except pymysql.err.OperationalError as e:
             # Handle specific database operational errors
             error_code, error_message = e.args
-            st.error(f"Database connection error: {error_code} - {error_message}")
-            st.info("The database server may be down or unreachable. Please try again later.")
+            if error_code == 2003:
+                st.error("🔌 Cannot connect to database server")
+                st.warning("The database server is not accessible from this location.")
+                st.info("**Note:** The database at 10.3.8.200 is on a private network and cannot be reached from Streamlit Cloud.")
+                st.info("**Solutions:**")
+                st.info("• Use a cloud-hosted MySQL service (AWS RDS, Google Cloud SQL, etc.)")
+                st.info("• Set up a publicly accessible database server")
+                st.info("• The database search feature works when running locally")
+            else:
+                st.error(f"Database connection error: {error_code} - {error_message}")
+                st.info("The database server may be down or unreachable. Please try again later.")
             print(f"MySQL Operational Error: {error_code} - {error_message}")
             return None
             
@@ -322,144 +337,103 @@ def search_devotees(search_term):
         st.info("If you're seeing connection errors, check your database credentials.")
         return None
 
-# --- Authentication Function ---
-def check_password():
-    """Returns `True` if the user had the correct password."""
-    
-    def password_entered():
-        """Checks whether a password entered by the user is correct."""
-        # Try to get credentials from secrets
-        correct_username = st.secrets.get("auth", {}).get("username", "admin")
-        correct_password = st.secrets.get("auth", {}).get("password", "password")
-        
-        if (st.session_state["username"] == correct_username and 
-            st.session_state["password"] == correct_password):
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Don't store password
-            del st.session_state["username"]  # Don't store username
-        else:
-            st.session_state["password_correct"] = False
-
-    # Return True if password is correct
-    if st.session_state.get("password_correct", False):
-        return True
-
-    # Show login form
-    st.title("🔐 Login")
-    st.text_input("Username", key="username")
-    st.text_input("Password", type="password", key="password")
-    st.button("Login", on_click=password_entered)
-    
-    if "password_correct" in st.session_state and not st.session_state["password_correct"]:
-        st.error("😕 Username or password incorrect")
-    
-    return False
-
 # --- Streamlit UI ---
-if check_password():
-    st.title("📸 Nepali Form C Photo Uploader")
-    
-    # Add logout button in sidebar
-    with st.sidebar:
-        st.write("### User Menu")
-        if st.button("🚪 Logout"):
-            st.session_state["password_correct"] = False
-            st.rerun()
+st.title("📸 Nepali Form C Photo Uploader")
 
-    # Create tabs
-    tab1, tab2 = st.tabs(["📤 Photo Management", "🔍 Database Search"])
+# Create tabs
+tab1, tab2 = st.tabs(["📤 Photo Management", "🔍 Database Search"])
 
-    # Tab 1: Photo Upload/Download
-    with tab1:
-        st.subheader("Upload Photo")
-        name = st.text_input("Person's Name")
-        photo = st.file_uploader("Choose a photo", type=["jpg", "jpeg", "png"])
+# Tab 1: Photo Upload/Download
+with tab1:
+    st.subheader("Upload Photo")
+    name = st.text_input("Person's Name")
+    photo = st.file_uploader("Choose a photo", type=["jpg", "jpeg", "png"])
 
-        # Show image preview if photo is uploaded
-        if photo:
-            st.image(photo, caption="Preview", width="stretch")
+    # Show image preview if photo is uploaded
+    if photo:
+        st.image(photo, caption="Preview", width="stretch")
 
-        # Add upload button
-        if st.button("Upload Photo") and photo and name:
-            safe_name = sanitize_filename(name)
-            compressed = compress_image(photo)
-            final_name = f"{safe_name}.jpg"
+    # Add upload button
+    if st.button("Upload Photo") and photo and name:
+        safe_name = sanitize_filename(name)
+        compressed = compress_image(photo)
+        final_name = f"{safe_name}.jpg"
 
-            if os.path.getsize(compressed) <= 50_000:
-                fid = upload_to_drive(compressed, final_name)
-                st.success(f"✅ Uploaded as {final_name}")
-                st.caption(f"Drive file ID → {fid}")
-                
-                # Auto-download the compressed image
-                with open(compressed, "rb") as f:
-                    st.download_button(
-                        label="⬇️ Download Compressed Image",
-                        data=f.read(),
-                        file_name=final_name,
-                        mime="image/jpeg"
-                    )
-            else:
-                st.error("❌ Could not compress below 50 KB. Try a smaller photo.")
-
-        st.divider()
-        st.subheader("Download Photo")
-        search_term = st.text_input("Search for files (e.g. John, Doe, etc.)")
-
-        if search_term:
-            # Search for matching files
-            matching_files = search_files(search_term)
+        if os.path.getsize(compressed) <= 50_000:
+            fid = upload_to_drive(compressed, final_name)
+            st.success(f"✅ Uploaded as {final_name}")
+            st.caption(f"Drive file ID → {fid}")
             
-            if matching_files:
-                st.write(f"Found {len(matching_files)} file(s):")
-                
-                # Create a dropdown with file names
-                file_names = [f["name"] for f in matching_files]
-                selected_file = st.selectbox("Select a file to download:", file_names)
-                
-                # Find the selected file's ID
-                selected_file_id = next(f["id"] for f in matching_files if f["name"] == selected_file)
-                
-                # Show preview of selected image
-                fh = download_file(selected_file_id)
-                st.image(fh, caption=f"Preview: {selected_file}", width="stretch")
-                
-                # Download button
-                fh.seek(0)  # Reset file pointer for download
+            # Auto-download the compressed image
+            with open(compressed, "rb") as f:
                 st.download_button(
-                    label="⬇️ Download Selected File",
-                    data=fh,
-                    file_name=selected_file,
+                    label="⬇️ Download Compressed Image",
+                    data=f.read(),
+                    file_name=final_name,
                     mime="image/jpeg"
                 )
-            else:
-                st.warning("❌ No files found matching your search.")
-
-    # Tab 2: Database Search
-    with tab2:
-        st.subheader("Search Devotees Database")
-        st.write("Search by First Name, Last Name, or PP Number")
-        
-        db_search_term = st.text_input("Enter search term:", key="db_search")
-        
-        if db_search_term:
-            with st.spinner("Searching database..."):
-                results_df = search_devotees(db_search_term)
-            
-            if results_df is not None:
-                if not results_df.empty:
-                    st.success(f"Found {len(results_df)} result(s)")
-                    
-                    # Display results in a table
-                    st.dataframe(
-                        results_df,
-                        use_container_width=True,
-                        hide_index=True
-                    )
-                else:
-                    st.warning(f"No results found for '{db_search_term}'")
-                    st.info("Try a different search term or check your spelling.")
-                    st.info("You can search by First Name, Last Name, or PP Number.")
-                    st.info("Partial matches are supported (e.g., 'Jo' will find 'John').")
-            
         else:
-            st.info("👆 Enter a search term above to search the database")
+            st.error("❌ Could not compress below 50 KB. Try a smaller photo.")
+
+    st.divider()
+    st.subheader("Download Photo")
+    search_term = st.text_input("Search for files (e.g. John, Doe, etc.)")
+
+    if search_term:
+        # Search for matching files
+        matching_files = search_files(search_term)
+        
+        if matching_files:
+            st.write(f"Found {len(matching_files)} file(s):")
+            
+            # Create a dropdown with file names
+            file_names = [f["name"] for f in matching_files]
+            selected_file = st.selectbox("Select a file to download:", file_names)
+            
+            # Find the selected file's ID
+            selected_file_id = next(f["id"] for f in matching_files if f["name"] == selected_file)
+            
+            # Show preview of selected image
+            fh = download_file(selected_file_id)
+            st.image(fh, caption=f"Preview: {selected_file}", width="stretch")
+            
+            # Download button
+            fh.seek(0)  # Reset file pointer for download
+            st.download_button(
+                label="⬇️ Download Selected File",
+                data=fh,
+                file_name=selected_file,
+                mime="image/jpeg"
+            )
+        else:
+            st.warning("❌ No files found matching your search.")
+
+# Tab 2: Database Search
+with tab2:
+    st.subheader("Search Devotees Database")
+    st.write("Search by First Name, Last Name, or PP Number")
+    
+    db_search_term = st.text_input("Enter search term:", key="db_search")
+    
+    if db_search_term:
+        with st.spinner("Searching database..."):
+            results_df = search_devotees(db_search_term)
+        
+        if results_df is not None:
+            if not results_df.empty:
+                st.success(f"Found {len(results_df)} result(s)")
+                
+                # Display results in a table
+                st.dataframe(
+                    results_df,
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.warning(f"No results found for '{db_search_term}'")
+                st.info("Try a different search term or check your spelling.")
+                st.info("You can search by First Name, Last Name, or PP Number.")
+                st.info("Partial matches are supported (e.g., 'Jo' will find 'John').")
+        
+    else:
+        st.info("👆 Enter a search term above to search the database")
